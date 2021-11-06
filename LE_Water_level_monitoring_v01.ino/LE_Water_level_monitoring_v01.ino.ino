@@ -17,8 +17,6 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h> // Click to install library: http://librarymanager/All#Adafruit_BME680
 
-#include <CayenneLPP.h>
-
 // Check if the board has an LED port defined
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 35
@@ -99,10 +97,6 @@ static uint32_t g_count_fail = 0;
 
 #define SENSOR_DEPTH 1.0
 
-// Cayenne
-
-CayenneLPP lpp(51);
-
 // BME680
 
 Adafruit_BME680 bme;
@@ -149,7 +143,7 @@ void setup()
   // Initialize Serial for debug output
   time_t timeout = millis();
   Serial.begin(115200);
-  while (!Serial)
+  /*while (!Serial)
   {
     if ((millis() - timeout) < 5000)
     {
@@ -159,7 +153,7 @@ void setup()
     {
       break;
     }
-  }
+  }*/
 
   Serial.println("=====================================");
   Serial.println("Welcome to RAK4630 LoRaWan!!!");
@@ -243,12 +237,15 @@ void loop()
   noInterrupts();
   depths = get_depths();
   if (! bme.performReading()) {
-    Serial.println("Failed to perform reading :(");
+    Serial.println("Failed to perform reading");
     return;
   }
   interrupts();
+  Serial.printf("Sensor 1 water depth %d\n", depths);
+  Serial.printf("Sensor 2 temperature %f\n", bme.temperature);
+  Serial.printf("Sensor 3 humidity %f\n", bme.humidity);
+  Serial.printf("Sensor 4 pressure %f\n", bme.pressure);
   delay(10000);
-  
 }
 
 /**@brief LoRa function for handling HasJoined event.
@@ -320,6 +317,15 @@ int get_depths(void)
   return depths;
 }
 
+void float2Bytes(byte bytes_temp[4], float float_variable){ 
+  byte buf[4] = {0x0, 0x0, 0x0, 0x0};
+  memcpy(buf, (unsigned char*) (&float_variable), 4);
+  bytes_temp[0] = buf[3];
+  bytes_temp[1] = buf[2];
+  bytes_temp[2] = buf[1];
+  bytes_temp[3] = buf[0];
+}
+
 void send_lora_frame(void)
 {
 
@@ -329,16 +335,34 @@ void send_lora_frame(void)
     return;
   }
 
-  
-  Serial.printf("llegada profundidad %d\n", depths);
   uint32_t i = 0;
 
   g_m_lora_app_data.port = g_AppPort;
-  g_m_lora_app_data.buffer[i++] = 0x07;
+  //Depth sensor
+  g_m_lora_app_data.buffer[i++] = 0x01;
+  g_m_lora_app_data.buffer[i++] = 0x00;
+  g_m_lora_app_data.buffer[i++] = 0x00;
   g_m_lora_app_data.buffer[i++] = (depths >> 8) & 0xFF;
   g_m_lora_app_data.buffer[i++] = depths & 0xFF;
-  g_m_lora_app_data.buffsize = i;
 
+  //Ambient temperature sensor
+  g_m_lora_app_data.buffer[i++] = 0x02;
+  float2Bytes(g_m_lora_app_data.buffer + i, bme.temperature);
+  i+=4;
+  
+   //Ambient humidity sensor
+  g_m_lora_app_data.buffer[i++] = 0x03;
+  float2Bytes(g_m_lora_app_data.buffer + i, bme.humidity);
+  i+=4;
+  
+  //Ambient pressure sensor
+  g_m_lora_app_data.buffer[i++] = 0x04;
+  g_m_lora_app_data.buffer[i++] = (bme.pressure >> 24) & 0xFF;
+  g_m_lora_app_data.buffer[i++] = (bme.pressure >> 16) & 0xFF;
+  g_m_lora_app_data.buffer[i++] = (bme.pressure >> 8) & 0xFF;
+  g_m_lora_app_data.buffer[i++] = bme.pressure & 0xFF;
+    
+  g_m_lora_app_data.buffsize = i;
 
 
   //lpp.reset();
@@ -363,6 +387,8 @@ void send_lora_frame(void)
     Serial.printf("lmh_send fail count %d\n", g_count_fail);
   }
 }
+
+
 
 /**@brief Function for handling user timerout event.
 */
