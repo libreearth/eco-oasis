@@ -13,6 +13,12 @@
 
 #include <SPI.h>
 
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME680.h> // Click to install library: http://librarymanager/All#Adafruit_BME680
+
+#include <CayenneLPP.h>
+
 // Check if the board has an LED port defined
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 35
@@ -33,6 +39,7 @@ DeviceClass_t g_CurrentClass = CLASS_A;
 LoRaMacRegion_t g_CurrentRegion = LORAMAC_REGION_EU868;    /* Region:EU868*/
 lmh_confirm g_CurrentConfirm = LMH_CONFIRMED_MSG;
 uint8_t g_AppPort = LORAWAN_APP_PORT;
+int depths = 0;
 
 /**@brief Structure containing LoRaWan parameters, needed for lmh_init()
 */
@@ -65,11 +72,11 @@ static lmh_callback_t g_lora_callbacks = {
 };
 
 //OTAA keys !!! KEYS ARE MSB !!!
-uint8_t nodeDeviceEUI[8] = {0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x04, 0x7B, 0x61}; 
+uint8_t nodeDeviceEUI[8] = {0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x04, 0x7B, 0x78}; 
 
 uint8_t nodeAppEUI[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
-uint8_t nodeAppKey[16] = {0x1D, 0x8F, 0xF6, 0xC5, 0x78, 0xAA, 0x81, 0x65, 0x89, 0x63, 0x87, 0xF4, 0x4D, 0x89, 0x3C, 0x54};
+uint8_t nodeAppKey[16] = {0x5C, 0x05, 0x97, 0xCF, 0x52, 0xEC, 0x9D, 0x31, 0x88, 0xE6, 0x76, 0x42, 0x2C, 0x54, 0xDD, 0x78};
 
 // ABP keys
 uint32_t nodeDevAddr = 0x260116F8;
@@ -88,6 +95,39 @@ static uint32_t timers_init(void);
 static uint32_t g_count = 0;
 static uint32_t g_count_fail = 0;
 
+// config
+
+#define SENSOR_DEPTH 1.0
+
+// Cayenne
+
+CayenneLPP lpp(51);
+
+// BME680
+
+Adafruit_BME680 bme;
+// Might need adjustments
+#define SEALEVELPRESSURE_HPA (1010.0)
+
+void bme680_init()
+{
+  Wire.begin();
+
+  if (!bme.begin(0x76)) {
+    Serial.println("Could not find a valid BME680 sensor, check wiring!");
+    return;
+  }
+
+  // Set up oversampling and filter initialization
+  bme.setTemperatureOversampling(BME680_OS_8X);
+  bme.setHumidityOversampling(BME680_OS_2X);
+  bme.setPressureOversampling(BME680_OS_4X);
+  bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
+  bme.setGasHeater(320, 150); // 320*C for 150 ms
+}
+
+
+
 void setup()
 {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -99,7 +139,7 @@ void setup()
   pinMode(WB_IO1, OUTPUT);
   digitalWrite(WB_IO1, HIGH);
 
-  pinMode(WB_A1, INPUT_PULLDOWN);
+  pinMode(WB_A0, INPUT_PULLDOWN);
   analogReference(AR_INTERNAL_3_0);
   analogOversampling(128);
 
@@ -193,12 +233,22 @@ void setup()
 
   // Start Join procedure
   lmh_join();
+
+  //bme init
+  bme680_init();
 }
 
 void loop()
 {
-  // Put your application tasks here, like reading of sensors,
-  // Controlling actuators and/or other functions. 
+  noInterrupts();
+  depths = get_depths();
+  if (! bme.performReading()) {
+    Serial.println("Failed to perform reading :(");
+    return;
+  }
+  interrupts();
+  delay(10000);
+  
 }
 
 /**@brief LoRa function for handling HasJoined event.
@@ -247,35 +297,31 @@ int get_depths(void)
 {
   int i;
 
-  int sensor_pin = WB_A1;   // select the input pin for the potentiometer
+  int sensor_pin = WB_A0;   // select the input pin for the potentiometer
   int mcu_ain_raw = 0; // variable to store the value coming from the sensor
 
   int depths; // variable to store the value of oil depths
   int average_raw;
-  float voltage_ain, voltage_sensor;
+  float voltage_ain, factor;
 
   for (i = 0; i < 5; i++)
   {
     mcu_ain_raw += analogRead(sensor_pin);
-    Serial.printf("-------raw- sensor %d ----- = %d \n",i , mcu_ain_raw);
   }
   average_raw = mcu_ain_raw / i;
-   Serial.printf("-------raw- sensor %d ----- \n" , average_raw);
+  voltage_ain = average_raw * (3.0/1024.0);
+ 
 
-  voltage_ain = average_raw * 3.0 / 1024; //raef 3.0v / 10bit ADC
-
-  voltage_sensor = voltage_ain / 0.6; //WisBlock RAK5811 (0 ~ 5V).   Input signal reduced to 6/10 and output
-
-  depths = (voltage_sensor * 1000 - 574) * 2.5; //Convert to millivolt. 574mv is the default output from sensor
-
-  Serial.printf("-------depths------ = %d mm\n", depths);
-  
+  factor = (voltage_ain-0.5)/2.0;
+  depths = factor*SENSOR_DEPTH*1000;
+ 
+  Serial.printf("read value = %d = %f v = %d mm\n" , average_raw, voltage_ain, depths);
+ 
   return depths;
 }
 
 void send_lora_frame(void)
 {
-  int depths;
 
   if (lmh_join_status_get() != LMH_SET)
   {
@@ -283,8 +329,8 @@ void send_lora_frame(void)
     return;
   }
 
-  depths = get_depths(); //Depth range: (0 ~ 5000mm)
-
+  
+  Serial.printf("llegada profundidad %d\n", depths);
   uint32_t i = 0;
 
   g_m_lora_app_data.port = g_AppPort;
@@ -293,6 +339,18 @@ void send_lora_frame(void)
   g_m_lora_app_data.buffer[i++] = depths & 0xFF;
   g_m_lora_app_data.buffsize = i;
 
+
+
+  //lpp.reset();
+  //lpp.addTemperature(1,bme.temperature);
+  //lpp.addRelativeHumidity(2,bme.humidity);
+  //lpp.addBarometricPressure(3,bme.pressure);
+  //lpp.addDistance(4, depths);
+
+  //memcpy(g_m_lora_app_data.buffer,lpp.getBuffer(),lpp.getSize());
+
+  //Serial.printf("pre send \n");
+  
   lmh_error_status error = lmh_send(&g_m_lora_app_data, g_CurrentConfirm);
   if (error == LMH_SUCCESS)
   {
