@@ -421,7 +421,6 @@ void loop()
   depths = get_depths();
   bme.performReading();
   interrupts();
-  delay(250)
   sht31d_measurement = sht3xd.readTempAndHumidity(SHT3XD_REPEATABILITY_HIGH, SHT3XD_MODE_POLLING, 50);
   Serial.printf("Sensor 1 water depth %d\n", depths);
   Serial.printf("Sensor 2 temperature %f\n", bme.temperature);
