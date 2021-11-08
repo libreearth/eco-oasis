@@ -127,10 +127,10 @@ void bme680_init()
 void setup()
 {
   pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);
+  digitalWrite(LED_BUILTIN, HIGH);
 
   pinMode(LED_BUILTIN2, OUTPUT);
-  digitalWrite(LED_BUILTIN2, LOW);
+  digitalWrite(LED_BUILTIN2, HIGH);
   
 
   /*
@@ -161,6 +161,7 @@ void setup()
       break;
     }
   }
+  digitalWrite(LED_BUILTIN, LOW);
 
   Serial.println("=====================================");
   Serial.println("Welcome to RAK4630 LoRaWan!!!");
@@ -252,7 +253,7 @@ void setup()
 void lorawan_has_joined_handler(void)
 {
   Serial.println("OTAA Mode, Network Joined!");
-  digitalWrite(LED_BUILTIN2, HIGH);
+  digitalWrite(LED_BUILTIN2, LOW);
 
   lmh_error_status ret = lmh_class_request(g_CurrentClass);
   if (ret == LMH_SUCCESS)
