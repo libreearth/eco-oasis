@@ -16,6 +16,7 @@
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h> // Click to install library: http://librarymanager/All#Adafruit_BME680
+#include "ClosedCube_SHT31D.h"
 
 // Check if the board has an LED port defined
 #ifndef LED_BUILTIN
@@ -103,6 +104,9 @@ Adafruit_BME680 bme;
 // Might need adjustments
 #define SEALEVELPRESSURE_HPA (1010.0)
 
+ClosedCube_SHT31D sht3xd;
+SHT31D sh31d_measurement;
+
 void bme680_init()
 {
   Wire.begin();
@@ -127,11 +131,17 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
+  pinMode(LED_BUILTIN2, OUTPUT);
+  digitalWrite(LED_BUILTIN2, LOW);
+  
+
   /*
      WisBLOCK 5811 Power On
   */
-  pinMode(WB_IO1, OUTPUT);
-  digitalWrite(WB_IO1, HIGH);
+  /*pinMode(WB_IO1, OUTPUT);
+  digitalWrite(WB_IO1, HIGH);*/
+
+  Wire.begin();
 
   pinMode(WB_A0, INPUT_PULLDOWN);
   analogReference(AR_INTERNAL_3_0);
@@ -141,19 +151,25 @@ void setup()
   lora_rak4630_init();
 
   // Initialize Serial for debug output
-  time_t timeout = millis();
   Serial.begin(115200);
-  /*while (!Serial)
+  time_t serial_timeout = millis();
+  while (!Serial)
   {
-    if ((millis() - timeout) < 5000)
+    if ((millis() - serial_timeout) < 5000)
     {
       delay(100);
+      digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
     }
     else
     {
       break;
     }
-  }*/
+  }
+  Serial.println("Config begin");
+  //water temperature sensor
+  sht3xd.begin(0x44); // I2C address: 0x44 or 0x45
+  if (sht3xd.periodicStart(SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ) != SHT3XD_NO_ERROR)
+    Serial.println("[ERROR] Cannot start periodic mode");
 
   Serial.println("=====================================");
   Serial.println("Welcome to RAK4630 LoRaWan!!!");
@@ -232,27 +248,12 @@ void setup()
   bme680_init();
 }
 
-void loop()
-{
-  noInterrupts();
-  depths = get_depths();
-  if (! bme.performReading()) {
-    Serial.println("Failed to perform reading");
-    return;
-  }
-  interrupts();
-  Serial.printf("Sensor 1 water depth %d\n", depths);
-  Serial.printf("Sensor 2 temperature %f\n", bme.temperature);
-  Serial.printf("Sensor 3 humidity %f\n", bme.humidity);
-  Serial.printf("Sensor 4 pressure %f\n", bme.pressure);
-  delay(10000);
-}
-
 /**@brief LoRa function for handling HasJoined event.
 */
 void lorawan_has_joined_handler(void)
 {
   Serial.println("OTAA Mode, Network Joined!");
+  digitalWrite(LED_BUILTIN2, HIGH);
 
   lmh_error_status ret = lmh_class_request(g_CurrentClass);
   if (ret == LMH_SUCCESS)
@@ -361,6 +362,11 @@ void send_lora_frame(void)
   g_m_lora_app_data.buffer[i++] = (bme.pressure >> 16) & 0xFF;
   g_m_lora_app_data.buffer[i++] = (bme.pressure >> 8) & 0xFF;
   g_m_lora_app_data.buffer[i++] = bme.pressure & 0xFF;
+
+  //Water temperature sensor
+  g_m_lora_app_data.buffer[i++] = 0x05;
+  float2Bytes(g_m_lora_app_data.buffer + i, sh31d_measurement.t);
+  i+=4;
     
   g_m_lora_app_data.buffsize = i;
 
@@ -408,4 +414,23 @@ uint32_t timers_init(void)
 {
   TimerInit(&g_appTimer, tx_lora_periodic_handler);
   return 0;
+}
+
+void loop()
+{
+  noInterrupts();
+  depths = get_depths();
+  if (! bme.performReading()) {
+    Serial.println("Failed to perform reading");
+    return;
+  }
+  sh31d_measurement =  sht3xd.readTempAndHumidity(SHT3XD_REPEATABILITY_LOW, SHT3XD_MODE_CLOCK_STRETCH, 50);
+  interrupts();
+  Serial.println(sht3xd.readSerialNumber());
+  Serial.printf("Sensor 1 water depth %d\n", depths);
+  Serial.printf("Sensor 2 temperature %f\n", bme.temperature);
+  Serial.printf("Sensor 3 humidity %f\n", bme.humidity);
+  Serial.printf("Sensor 4 pressure %d\n", bme.pressure);
+  Serial.printf("Sensor 5 water temp %d\n", sh31d_measurement.t);
+  delay(10000);
 }
