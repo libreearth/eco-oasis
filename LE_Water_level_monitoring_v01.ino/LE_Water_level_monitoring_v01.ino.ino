@@ -105,12 +105,10 @@ Adafruit_BME680 bme;
 #define SEALEVELPRESSURE_HPA (1010.0)
 
 ClosedCube_SHT31D sht3xd;
-SHT31D sh31d_measurement;
+SHT31D sht31d_measurement;
 
 void bme680_init()
 {
-  Wire.begin();
-
   if (!bme.begin(0x76)) {
     Serial.println("Could not find a valid BME680 sensor, check wiring!");
     return;
@@ -141,8 +139,6 @@ void setup()
   /*pinMode(WB_IO1, OUTPUT);
   digitalWrite(WB_IO1, HIGH);*/
 
-  Wire.begin();
-
   pinMode(WB_A0, INPUT_PULLDOWN);
   analogReference(AR_INTERNAL_3_0);
   analogOversampling(128);
@@ -165,11 +161,6 @@ void setup()
       break;
     }
   }
-  Serial.println("Config begin");
-  //water temperature sensor
-  sht3xd.begin(0x44); // I2C address: 0x44 or 0x45
-  if (sht3xd.periodicStart(SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ) != SHT3XD_NO_ERROR)
-    Serial.println("[ERROR] Cannot start periodic mode");
 
   Serial.println("=====================================");
   Serial.println("Welcome to RAK4630 LoRaWan!!!");
@@ -244,8 +235,16 @@ void setup()
   // Start Join procedure
   lmh_join();
 
+  Wire.begin();
+
   //bme init
   bme680_init();
+  //water temp
+  sht3xd.begin(0x44); // I2C address: 0x44 or 0x45
+  Serial.print("Serial #");
+  Serial.println(sht3xd.readSerialNumber());
+  if (sht3xd.periodicStart(SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ) != SHT3XD_NO_ERROR) 
+    Serial.println("[ERROR] Cannot start periodic mode");
 }
 
 /**@brief LoRa function for handling HasJoined event.
@@ -365,7 +364,7 @@ void send_lora_frame(void)
 
   //Water temperature sensor
   g_m_lora_app_data.buffer[i++] = 0x05;
-  float2Bytes(g_m_lora_app_data.buffer + i, sh31d_measurement.t);
+  float2Bytes(g_m_lora_app_data.buffer + i, sht31d_measurement.t);
   i+=4;
     
   g_m_lora_app_data.buffsize = i;
@@ -420,17 +419,14 @@ void loop()
 {
   noInterrupts();
   depths = get_depths();
-  if (! bme.performReading()) {
-    Serial.println("Failed to perform reading");
-    return;
-  }
-  sh31d_measurement =  sht3xd.readTempAndHumidity(SHT3XD_REPEATABILITY_LOW, SHT3XD_MODE_CLOCK_STRETCH, 50);
+  bme.performReading();
   interrupts();
-  Serial.println(sht3xd.readSerialNumber());
+  delay(250)
+  sht31d_measurement = sht3xd.readTempAndHumidity(SHT3XD_REPEATABILITY_HIGH, SHT3XD_MODE_POLLING, 50);
   Serial.printf("Sensor 1 water depth %d\n", depths);
   Serial.printf("Sensor 2 temperature %f\n", bme.temperature);
   Serial.printf("Sensor 3 humidity %f\n", bme.humidity);
   Serial.printf("Sensor 4 pressure %d\n", bme.pressure);
-  Serial.printf("Sensor 5 water temp %d\n", sh31d_measurement.t);
+  Serial.printf("Sensor 5 water temp %f\n", sht31d_measurement.t);
   delay(10000);
 }
