@@ -1,11 +1,6 @@
 /**
- * @file Water_Level_Monitoring.ino
- * @author rakwireless.com
- * @brief This sketch demonstrate reading a water level sensor
- *    and send the data to lora gateway.
- * @version 0.1
- * @date 2020-07-28
- * @copyright Copyright (c) 2020
+ * Libre earth solutions SL
+ * 2021
  */
 #include <Arduino.h>
 
@@ -95,17 +90,25 @@ static uint32_t g_count = 0;
 static uint32_t g_count_fail = 0;
 
 // config
-
 #define SENSOR_DEPTH 1.0
 
 // BME680
-
 Adafruit_BME680 bme;
+
 // Might need adjustments
 #define SEALEVELPRESSURE_HPA (1010.0)
 
 ClosedCube_SHT31D sht3xd;
 SHT31D sht31d_measurement;
+
+void water_temp_init()
+{
+  sht3xd.begin(0x44); // I2C address: 0x44 or 0x45
+  Serial.print("Serial #");
+  Serial.println(sht3xd.readSerialNumber());
+  if (sht3xd.periodicStart(SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ) != SHT3XD_NO_ERROR) 
+    Serial.println("[ERROR] Cannot start periodic mode");
+}
 
 void bme680_init()
 {
@@ -120,132 +123,6 @@ void bme680_init()
   bme.setPressureOversampling(BME680_OS_4X);
   bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
   bme.setGasHeater(320, 150); // 320*C for 150 ms
-}
-
-
-
-void setup()
-{
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH);
-
-  pinMode(LED_BUILTIN2, OUTPUT);
-  digitalWrite(LED_BUILTIN2, HIGH);
-  
-
-  /*
-     WisBLOCK 5811 Power On
-  */
-  /*pinMode(WB_IO1, OUTPUT);
-  digitalWrite(WB_IO1, HIGH);*/
-
-  pinMode(WB_A0, INPUT_PULLDOWN);
-  analogReference(AR_INTERNAL_3_0);
-  analogOversampling(128);
-
-  // Initialize LoRa chip.
-  lora_rak4630_init();
-
-  // Initialize Serial for debug output
-  Serial.begin(115200);
-  time_t serial_timeout = millis();
-  while (!Serial)
-  {
-    if ((millis() - serial_timeout) < 5000)
-    {
-      delay(100);
-      digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-    }
-    else
-    {
-      break;
-    }
-  }
-  digitalWrite(LED_BUILTIN, LOW);
-
-  Serial.println("=====================================");
-  Serial.println("Welcome to RAK4630 LoRaWan!!!");
-  if (doOTAA)
-  {
-    Serial.println("Type: OTAA");
-  }
-  else
-  {
-    Serial.println("Type: ABP");
-  }
-
-  switch (g_CurrentRegion)
-  {
-    case LORAMAC_REGION_AS923:
-      Serial.println("Region: AS923");
-      break;
-    case LORAMAC_REGION_AU915:
-      Serial.println("Region: AU915");
-      break;
-    case LORAMAC_REGION_CN470:
-      Serial.println("Region: CN470");
-      break;
-    case LORAMAC_REGION_EU433:
-      Serial.println("Region: EU433");
-      break;
-    case LORAMAC_REGION_IN865:
-      Serial.println("Region: IN865");
-      break;
-    case LORAMAC_REGION_EU868:
-      Serial.println("Region: EU868");
-      break;
-    case LORAMAC_REGION_KR920:
-      Serial.println("Region: KR920");
-      break;
-    case LORAMAC_REGION_US915:
-      Serial.println("Region: US915");
-      break;
-  }
-  Serial.println("=====================================");
-  //creat a user timer to send data to server period
-  uint32_t err_code;
-  err_code = timers_init();
-  if (err_code != 0)
-  {
-    Serial.printf("timers_init failed - %d\n", err_code);
-    return;
-  }
-
-  // Setup the EUIs and Keys
-  if (doOTAA)
-  {
-    lmh_setDevEui(nodeDeviceEUI);
-    lmh_setAppEui(nodeAppEUI);
-    lmh_setAppKey(nodeAppKey);
-  }
-  else
-  {
-    lmh_setNwkSKey(nodeNwsKey);
-    lmh_setAppSKey(nodeAppsKey);
-    lmh_setDevAddr(nodeDevAddr);
-  }
-
-  // Initialize LoRaWan
-  err_code = lmh_init(&g_lora_callbacks, g_lora_param_init, doOTAA, g_CurrentClass, g_CurrentRegion);
-  if (err_code != 0)
-  {
-    Serial.printf("lmh_init failed - %d\n", err_code);
-    return;
-  }
-
-  // Start Join procedure
-  lmh_join();
-
-  Wire.begin();
-
-  //bme init
-  bme680_init();
-  //water temp
-  sht3xd.begin(0x44); // I2C address: 0x44 or 0x45
-  Serial.print("Serial #");
-  Serial.println(sht3xd.readSerialNumber());
-  if (sht3xd.periodicStart(SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ) != SHT3XD_NO_ERROR) 
-    Serial.println("[ERROR] Cannot start periodic mode");
 }
 
 /**@brief LoRa function for handling HasJoined event.
@@ -369,23 +246,15 @@ void send_lora_frame(void)
   i+=4;
     
   g_m_lora_app_data.buffsize = i;
-
-
-  //lpp.reset();
-  //lpp.addTemperature(1,bme.temperature);
-  //lpp.addRelativeHumidity(2,bme.humidity);
-  //lpp.addBarometricPressure(3,bme.pressure);
-  //lpp.addDistance(4, depths);
-
-  //memcpy(g_m_lora_app_data.buffer,lpp.getBuffer(),lpp.getSize());
-
-  //Serial.printf("pre send \n");
   
   lmh_error_status error = lmh_send(&g_m_lora_app_data, g_CurrentConfirm);
   if (error == LMH_SUCCESS)
   {
     g_count++;
+    digitalWrite(LED_BUILTIN2, HIGH);
     Serial.printf("lmh_send ok count %d\n", g_count);
+    delay(100);
+    digitalWrite(LED_BUILTIN2, LOW);
   }
   else
   {
@@ -416,8 +285,127 @@ uint32_t timers_init(void)
   return 0;
 }
 
+void setup()
+{
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+
+  pinMode(LED_BUILTIN2, OUTPUT);
+  digitalWrite(LED_BUILTIN2, HIGH);
+  
+
+  /*
+     WisBLOCK 5811 Power On
+  */
+  /*pinMode(WB_IO1, OUTPUT);
+  digitalWrite(WB_IO1, HIGH);*/
+
+  pinMode(WB_A0, INPUT_PULLDOWN);
+  analogReference(AR_INTERNAL_3_0);
+  analogOversampling(128);
+
+  // Initialize LoRa chip.
+  lora_rak4630_init();
+
+  // Initialize Serial for debug output
+  Serial.begin(115200);
+  time_t serial_timeout = millis();
+  while (!Serial)
+  {
+    if ((millis() - serial_timeout) < 5000)
+    {
+      delay(100);
+      digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+    }
+    else
+    {
+      break;
+    }
+  }
+  digitalWrite(LED_BUILTIN, LOW);
+
+  Serial.println("=====================================");
+  Serial.println("Welcome to RAK4630 LoRaWan!!!");
+  if (doOTAA)
+  {
+    Serial.println("Type: OTAA");
+  }
+  else
+  {
+    Serial.println("Type: ABP");
+  }
+
+  switch (g_CurrentRegion)
+  {
+    case LORAMAC_REGION_AS923:
+      Serial.println("Region: AS923");
+      break;
+    case LORAMAC_REGION_AU915:
+      Serial.println("Region: AU915");
+      break;
+    case LORAMAC_REGION_CN470:
+      Serial.println("Region: CN470");
+      break;
+    case LORAMAC_REGION_EU433:
+      Serial.println("Region: EU433");
+      break;
+    case LORAMAC_REGION_IN865:
+      Serial.println("Region: IN865");
+      break;
+    case LORAMAC_REGION_EU868:
+      Serial.println("Region: EU868");
+      break;
+    case LORAMAC_REGION_KR920:
+      Serial.println("Region: KR920");
+      break;
+    case LORAMAC_REGION_US915:
+      Serial.println("Region: US915");
+      break;
+  }
+  Serial.println("=====================================");
+  //creat a user timer to send data to server period
+  uint32_t err_code;
+  err_code = timers_init();
+  if (err_code != 0)
+  {
+    Serial.printf("timers_init failed - %d\n", err_code);
+    return;
+  }
+
+  // Setup the EUIs and Keys
+  if (doOTAA)
+  {
+    lmh_setDevEui(nodeDeviceEUI);
+    lmh_setAppEui(nodeAppEUI);
+    lmh_setAppKey(nodeAppKey);
+  }
+  else
+  {
+    lmh_setNwkSKey(nodeNwsKey);
+    lmh_setAppSKey(nodeAppsKey);
+    lmh_setDevAddr(nodeDevAddr);
+  }
+
+  // Initialize LoRaWan
+  err_code = lmh_init(&g_lora_callbacks, g_lora_param_init, doOTAA, g_CurrentClass, g_CurrentRegion);
+  if (err_code != 0)
+  {
+    Serial.printf("lmh_init failed - %d\n", err_code);
+    return;
+  }
+
+  // Start Join procedure
+  lmh_join();
+
+  // IC2 sensors
+  Wire.begin();
+  bme680_init();
+  water_temp_init();
+}
+
 void loop()
 {
+  digitalWrite(LED_BUILTIN, HIGH);
   noInterrupts();
   depths = get_depths();
   bme.performReading();
@@ -428,5 +416,6 @@ void loop()
   Serial.printf("Sensor 3 humidity %f\n", bme.humidity);
   Serial.printf("Sensor 4 pressure %d\n", bme.pressure);
   Serial.printf("Sensor 5 water temp %f\n", sht31d_measurement.t);
+  digitalWrite(LED_BUILTIN, LOW);
   delay(10000);
 }
