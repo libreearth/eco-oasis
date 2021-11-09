@@ -13,6 +13,18 @@
 #include <Adafruit_BME680.h> // Click to install library: http://librarymanager/All#Adafruit_BME680
 #include "ClosedCube_SHT31D.h"
 
+//Real OTAA keys written down in secret.h
+#include "secret.h"
+//uint8_t nodeDeviceEUI[8] = {0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x04, 0x7B, 0x78}; 
+//uint8_t nodeAppEUI[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+//uint8_t nodeAppKey[16] = {0x5C, 0x05, 0x97, 0xCF, 0x52, 0xEC, 0x9D, 0x31, 0x88, 0xE6, 0x76, 0x42, 0x2C, 0x54, 0xDD, 0x78};
+
+//Setup
+#define SENSOR_DEPTH 1.0
+#define HAS_DEPTH_SENSOR true
+#define HAS_WATER_TEMP true
+#define HAS_BME680 true
+
 // Check if the board has an LED port defined
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 35
@@ -65,17 +77,6 @@ static lmh_callback_t g_lora_callbacks = {
   lorawan_join_failed_handler
 };
 
-//OTAA keys !!! KEYS ARE MSB !!!
-uint8_t nodeDeviceEUI[8] = {0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x04, 0x7B, 0x78}; 
-
-uint8_t nodeAppEUI[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-
-uint8_t nodeAppKey[16] = {0x5C, 0x05, 0x97, 0xCF, 0x52, 0xEC, 0x9D, 0x31, 0x88, 0xE6, 0x76, 0x42, 0x2C, 0x54, 0xDD, 0x78};
-
-// ABP keys
-uint32_t nodeDevAddr = 0x260116F8;
-uint8_t nodeNwsKey[16] = {0x7E, 0xAC, 0xE2, 0x55, 0xB8, 0xA5, 0xE2, 0x69, 0x91, 0x51, 0x96, 0x06, 0x47, 0x56, 0x9D, 0x23};
-uint8_t nodeAppsKey[16] = {0xFB, 0xAC, 0xB6, 0x47, 0xF3, 0x58, 0x45, 0xC7, 0x50, 0x7D, 0xBF, 0x16, 0x8B, 0xA8, 0xC1, 0x7C};
 
 // Private defination
 #define LORAWAN_APP_DATA_BUFF_SIZE 64                     /**< buffer size of the data to be transmitted. */
@@ -88,9 +89,7 @@ static uint32_t timers_init(void);
 
 static uint32_t g_count = 0;
 static uint32_t g_count_fail = 0;
-
-// config
-#define SENSOR_DEPTH 1.0
+static boolean blocked_not_join = false;
 
 // BME680
 Adafruit_BME680 bme;
@@ -217,33 +216,39 @@ void send_lora_frame(void)
 
   g_m_lora_app_data.port = g_AppPort;
   //Depth sensor
-  g_m_lora_app_data.buffer[i++] = 0x01;
-  g_m_lora_app_data.buffer[i++] = 0x00;
-  g_m_lora_app_data.buffer[i++] = 0x00;
-  g_m_lora_app_data.buffer[i++] = (depths >> 8) & 0xFF;
-  g_m_lora_app_data.buffer[i++] = depths & 0xFF;
+  if (HAS_DEPTH_SENSOR){
+    g_m_lora_app_data.buffer[i++] = 0x01;
+    g_m_lora_app_data.buffer[i++] = 0x00;
+    g_m_lora_app_data.buffer[i++] = 0x00;
+    g_m_lora_app_data.buffer[i++] = (depths >> 8) & 0xFF;
+    g_m_lora_app_data.buffer[i++] = depths & 0xFF;
+  }
 
-  //Ambient temperature sensor
-  g_m_lora_app_data.buffer[i++] = 0x02;
-  float2Bytes(g_m_lora_app_data.buffer + i, bme.temperature);
-  i+=4;
-  
-   //Ambient humidity sensor
-  g_m_lora_app_data.buffer[i++] = 0x03;
-  float2Bytes(g_m_lora_app_data.buffer + i, bme.humidity);
-  i+=4;
-  
-  //Ambient pressure sensor
-  g_m_lora_app_data.buffer[i++] = 0x04;
-  g_m_lora_app_data.buffer[i++] = (bme.pressure >> 24) & 0xFF;
-  g_m_lora_app_data.buffer[i++] = (bme.pressure >> 16) & 0xFF;
-  g_m_lora_app_data.buffer[i++] = (bme.pressure >> 8) & 0xFF;
-  g_m_lora_app_data.buffer[i++] = bme.pressure & 0xFF;
+  if (HAS_BME680) {
+    //Ambient temperature sensor
+    g_m_lora_app_data.buffer[i++] = 0x02;
+    float2Bytes(g_m_lora_app_data.buffer + i, bme.temperature);
+    i+=4;
+    
+     //Ambient humidity sensor
+    g_m_lora_app_data.buffer[i++] = 0x03;
+    float2Bytes(g_m_lora_app_data.buffer + i, bme.humidity);
+    i+=4;
+    
+    //Ambient pressure sensor
+    g_m_lora_app_data.buffer[i++] = 0x04;
+    g_m_lora_app_data.buffer[i++] = (bme.pressure >> 24) & 0xFF;
+    g_m_lora_app_data.buffer[i++] = (bme.pressure >> 16) & 0xFF;
+    g_m_lora_app_data.buffer[i++] = (bme.pressure >> 8) & 0xFF;
+    g_m_lora_app_data.buffer[i++] = bme.pressure & 0xFF;
+  }
 
   //Water temperature sensor
-  g_m_lora_app_data.buffer[i++] = 0x05;
-  float2Bytes(g_m_lora_app_data.buffer + i, sht31d_measurement.t);
-  i+=4;
+  if (HAS_WATER_TEMP){
+    g_m_lora_app_data.buffer[i++] = 0x05;
+    float2Bytes(g_m_lora_app_data.buffer + i, sht31d_measurement.t);
+    i+=4;
+  }
     
   g_m_lora_app_data.buffsize = i;
   
@@ -300,9 +305,11 @@ void setup()
   /*pinMode(WB_IO1, OUTPUT);
   digitalWrite(WB_IO1, HIGH);*/
 
-  pinMode(WB_A0, INPUT_PULLDOWN);
-  analogReference(AR_INTERNAL_3_0);
-  analogOversampling(128);
+  if (HAS_DEPTH_SENSOR){
+    pinMode(WB_A0, INPUT_PULLDOWN);
+    analogReference(AR_INTERNAL_3_0);
+    analogOversampling(128);
+  }
 
   // Initialize LoRa chip.
   lora_rak4630_init();
@@ -326,42 +333,6 @@ void setup()
 
   Serial.println("=====================================");
   Serial.println("Welcome to RAK4630 LoRaWan!!!");
-  if (doOTAA)
-  {
-    Serial.println("Type: OTAA");
-  }
-  else
-  {
-    Serial.println("Type: ABP");
-  }
-
-  switch (g_CurrentRegion)
-  {
-    case LORAMAC_REGION_AS923:
-      Serial.println("Region: AS923");
-      break;
-    case LORAMAC_REGION_AU915:
-      Serial.println("Region: AU915");
-      break;
-    case LORAMAC_REGION_CN470:
-      Serial.println("Region: CN470");
-      break;
-    case LORAMAC_REGION_EU433:
-      Serial.println("Region: EU433");
-      break;
-    case LORAMAC_REGION_IN865:
-      Serial.println("Region: IN865");
-      break;
-    case LORAMAC_REGION_EU868:
-      Serial.println("Region: EU868");
-      break;
-    case LORAMAC_REGION_KR920:
-      Serial.println("Region: KR920");
-      break;
-    case LORAMAC_REGION_US915:
-      Serial.println("Region: US915");
-      break;
-  }
   Serial.println("=====================================");
   //creat a user timer to send data to server period
   uint32_t err_code;
@@ -369,28 +340,21 @@ void setup()
   if (err_code != 0)
   {
     Serial.printf("timers_init failed - %d\n", err_code);
+    digitalWrite(LED_BUILTIN2, HIGH);
     return;
   }
 
   // Setup the EUIs and Keys
-  if (doOTAA)
-  {
-    lmh_setDevEui(nodeDeviceEUI);
-    lmh_setAppEui(nodeAppEUI);
-    lmh_setAppKey(nodeAppKey);
-  }
-  else
-  {
-    lmh_setNwkSKey(nodeNwsKey);
-    lmh_setAppSKey(nodeAppsKey);
-    lmh_setDevAddr(nodeDevAddr);
-  }
-
+  lmh_setDevEui(nodeDeviceEUI);
+  lmh_setAppEui(nodeAppEUI);
+  lmh_setAppKey(nodeAppKey);
+  
   // Initialize LoRaWan
   err_code = lmh_init(&g_lora_callbacks, g_lora_param_init, doOTAA, g_CurrentClass, g_CurrentRegion);
   if (err_code != 0)
   {
     Serial.printf("lmh_init failed - %d\n", err_code);
+    digitalWrite(LED_BUILTIN2, HIGH);
     return;
   }
 
@@ -399,23 +363,32 @@ void setup()
 
   // IC2 sensors
   Wire.begin();
-  bme680_init();
-  water_temp_init();
+  if (HAS_BME680)
+    bme680_init();
+  if (HAS_WATER_TEMP)
+    water_temp_init();
 }
 
 void loop()
 {
   digitalWrite(LED_BUILTIN, HIGH);
   noInterrupts();
-  depths = get_depths();
-  bme.performReading();
+  if (HAS_DEPTH_SENSOR)
+    depths = get_depths();
+  if (HAS_BME680)
+    bme.performReading();
   interrupts();
-  sht31d_measurement = sht3xd.readTempAndHumidity(SHT3XD_REPEATABILITY_HIGH, SHT3XD_MODE_POLLING, 50);
-  Serial.printf("Sensor 1 water depth %d\n", depths);
-  Serial.printf("Sensor 2 temperature %f\n", bme.temperature);
-  Serial.printf("Sensor 3 humidity %f\n", bme.humidity);
-  Serial.printf("Sensor 4 pressure %d\n", bme.pressure);
-  Serial.printf("Sensor 5 water temp %f\n", sht31d_measurement.t);
+  if (HAS_WATER_TEMP)
+    sht31d_measurement = sht3xd.readTempAndHumidity(SHT3XD_REPEATABILITY_HIGH, SHT3XD_MODE_POLLING, 50);
+  if (HAS_DEPTH_SENSOR)
+    Serial.printf("Sensor 1 water depth %d\n", depths);
+  if (HAS_BME680){
+    Serial.printf("Sensor 2 temperature %f\n", bme.temperature);
+    Serial.printf("Sensor 3 humidity %f\n", bme.humidity);
+    Serial.printf("Sensor 4 pressure %d\n", bme.pressure);
+  }
+  if (HAS_WATER_TEMP)
+    Serial.printf("Sensor 5 water temp %f\n", sht31d_measurement.t);
   digitalWrite(LED_BUILTIN, LOW);
-  delay(10000);
+  delay(15000);
 }
