@@ -14,6 +14,7 @@
 #include "ClosedCube_SHT31D.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <TinyGPS.h>        //http://librarymanager/All#TinyGPS
 
 //Real OTAA keys written down in secret.h
 #include "secret.h"
@@ -23,10 +24,11 @@
 
 //Setup
 #define SENSOR_DEPTH 25.0
-#define HAS_DEPTH_SENSOR true
+#define HAS_DEPTH_SENSOR false
 #define HAS_WATER_TEMP false
 #define HAS_BME680 false
-#define HAS_DS18B20 true
+#define HAS_DS18B20 false
+#define HAS_GPS true
 
 // Check if the board has an LED port defined
 #ifndef LED_BUILTIN
@@ -49,6 +51,9 @@ LoRaMacRegion_t g_CurrentRegion = LORAMAC_REGION_EU868;    /* Region:EU868*/
 lmh_confirm g_CurrentConfirm = LMH_CONFIRMED_MSG;
 uint8_t g_AppPort = LORAWAN_APP_PORT;
 int depths = 0;
+float flat, flon;
+int sats;
+unsigned long age;
 
 /**@brief Structure containing LoRaWan parameters, needed for lmh_init()
 */
@@ -107,6 +112,9 @@ SHT31D sht31d_measurement;
 OneWire oneWireObjeto(WB_IO1);
 DallasTemperature sensorDS18B20(&oneWireObjeto);
 
+//gps
+TinyGPS gps;
+
 void water_temp_init()
 {
   sht3xd.begin(0x44); // I2C address: 0x44 or 0x45
@@ -129,6 +137,18 @@ void bme680_init()
   bme.setPressureOversampling(BME680_OS_4X);
   bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
   bme.setGasHeater(320, 150); // 320*C for 150 ms
+}
+
+void gps_init(){
+  pinMode(WB_IO2, OUTPUT);
+  digitalWrite(WB_IO2, 0);
+  delay(1000);
+  digitalWrite(WB_IO2, 1);
+  delay(1000);
+  
+  Serial1.begin(9600);
+  while (!Serial1);
+  Serial.println("gps uart init ok!");
 }
 
 /**@brief LoRa function for handling HasJoined event.
@@ -201,6 +221,26 @@ int get_depths(void)
   return depths;
 }
 
+void read_gps_data(){
+  // For one second we parse GPS data and report some key values
+  boolean newData = false;
+  for (unsigned long start = millis(); millis() - start < 1000;)
+  {
+    while (Serial1.available())
+    {
+      char c = Serial1.read();
+      if (gps.encode(c))// Did a new valid sentence come in?
+        newData = true;
+    }
+  }
+
+  if (newData)
+  {
+    gps.f_get_position(&flat, &flon, &age);
+    sats = gps.satellites();
+  }
+}
+
 void float2Bytes(byte bytes_temp[4], float float_variable){ 
   byte buf[4] = {0x0, 0x0, 0x0, 0x0};
   memcpy(buf, (unsigned char*) (&float_variable), 4);
@@ -262,6 +302,22 @@ void send_lora_frame(void)
     float2Bytes(g_m_lora_app_data.buffer + i, sensorDS18B20.getTempCByIndex(0));
     i+=4;
   }
+
+  if (HAS_GPS) {
+    g_m_lora_app_data.buffer[i++] = 0x07;
+    float2Bytes(g_m_lora_app_data.buffer + i, flat);
+    i+=4;
+    
+    g_m_lora_app_data.buffer[i++] = 0x08;
+    float2Bytes(g_m_lora_app_data.buffer + i, flon);
+    i+=4;
+
+    g_m_lora_app_data.buffer[i++] = 0x09;
+    g_m_lora_app_data.buffer[i++] = 0x00;
+    g_m_lora_app_data.buffer[i++] = 0x00;
+    g_m_lora_app_data.buffer[i++] = (sats >> 8) & 0xFF;
+    g_m_lora_app_data.buffer[i++] = sats & 0xFF;
+  }
     
   g_m_lora_app_data.buffsize = i;
   
@@ -280,8 +336,6 @@ void send_lora_frame(void)
     Serial.printf("lmh_send fail count %d\n", g_count_fail);
   }
 }
-
-
 
 /**@brief Function for handling user timerout event.
 */
@@ -382,6 +436,8 @@ void setup()
     water_temp_init();
   if (HAS_DS18B20)
     sensorDS18B20.begin(); 
+  if (HAS_GPS)
+    gps_init();
 }
 
 void loop()
@@ -393,6 +449,8 @@ void loop()
   if (HAS_BME680)
     bme.performReading();
   interrupts();
+  if (HAS_GPS)
+    read_gps_data();
   if (HAS_DS18B20)
     sensorDS18B20.requestTemperatures();
   if (HAS_WATER_TEMP)
@@ -408,6 +466,11 @@ void loop()
     Serial.printf("Sensor 5 water temp %f\n", sht31d_measurement.t);
   if (HAS_DS18B20)
     Serial.printf("Sensor 6 DS18B20 water temp %f\n", sensorDS18B20.getTempCByIndex(0));
+  if (HAS_GPS){
+    Serial.printf("Sensor 7 latitude %f\n", flat);
+    Serial.printf("Sensor 8 longitude %f\n", flon);
+    Serial.printf("Sensor 9 satellites %d\n", sats);
+  }
 
   digitalWrite(LED_BUILTIN, LOW);
   delay(15000);
