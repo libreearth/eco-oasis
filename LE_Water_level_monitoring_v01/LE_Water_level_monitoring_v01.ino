@@ -12,6 +12,8 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME680.h> // Click to install library: http://librarymanager/All#Adafruit_BME680
 #include "ClosedCube_SHT31D.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 //Real OTAA keys written down in secret.h
 #include "secret.h"
@@ -20,10 +22,11 @@
 //uint8_t nodeAppKey[16] = {0x5C, 0x05, 0x97, 0xCF, 0x52, 0xEC, 0x9D, 0x31, 0x88, 0xE6, 0x76, 0x42, 0x2C, 0x54, 0xDD, 0x78};
 
 //Setup
-#define SENSOR_DEPTH 1.0
+#define SENSOR_DEPTH 25.0
 #define HAS_DEPTH_SENSOR true
-#define HAS_WATER_TEMP true
-#define HAS_BME680 true
+#define HAS_WATER_TEMP false
+#define HAS_BME680 false
+#define HAS_DS18B20 true
 
 // Check if the board has an LED port defined
 #ifndef LED_BUILTIN
@@ -99,6 +102,10 @@ Adafruit_BME680 bme;
 
 ClosedCube_SHT31D sht3xd;
 SHT31D sht31d_measurement;
+
+// dallas temperature sensor
+OneWire oneWireObjeto(WB_IO1);
+DallasTemperature sensorDS18B20(&oneWireObjeto);
 
 void water_temp_init()
 {
@@ -249,6 +256,12 @@ void send_lora_frame(void)
     float2Bytes(g_m_lora_app_data.buffer + i, sht31d_measurement.t);
     i+=4;
   }
+
+  if (HAS_DS18B20) {
+    g_m_lora_app_data.buffer[i++] = 0x06;
+    float2Bytes(g_m_lora_app_data.buffer + i, sensorDS18B20.getTempCByIndex(0));
+    i+=4;
+  }
     
   g_m_lora_app_data.buffsize = i;
   
@@ -367,6 +380,8 @@ void setup()
     bme680_init();
   if (HAS_WATER_TEMP)
     water_temp_init();
+  if (HAS_DS18B20)
+    sensorDS18B20.begin(); 
 }
 
 void loop()
@@ -378,6 +393,8 @@ void loop()
   if (HAS_BME680)
     bme.performReading();
   interrupts();
+  if (HAS_DS18B20)
+    sensorDS18B20.requestTemperatures();
   if (HAS_WATER_TEMP)
     sht31d_measurement = sht3xd.readTempAndHumidity(SHT3XD_REPEATABILITY_HIGH, SHT3XD_MODE_POLLING, 50);
   if (HAS_DEPTH_SENSOR)
@@ -389,6 +406,9 @@ void loop()
   }
   if (HAS_WATER_TEMP)
     Serial.printf("Sensor 5 water temp %f\n", sht31d_measurement.t);
+  if (HAS_DS18B20)
+    Serial.printf("Sensor 6 DS18B20 water temp %f\n", sensorDS18B20.getTempCByIndex(0));
+
   digitalWrite(LED_BUILTIN, LOW);
   delay(15000);
 }
