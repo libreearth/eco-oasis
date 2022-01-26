@@ -22,14 +22,6 @@
 //uint8_t nodeAppEUI[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 //uint8_t nodeAppKey[16] = {0x5C, 0x05, 0x97, 0xCF, 0x52, 0xEC, 0x9D, 0x31, 0x88, 0xE6, 0x76, 0x42, 0x2C, 0x54, 0xDD, 0x78};
 
-//Setup
-#define SENSOR_DEPTH 25.0
-#define HAS_DEPTH_SENSOR false
-#define HAS_WATER_TEMP false
-#define HAS_BME680 false
-#define HAS_DS18B20 false
-#define HAS_GPS true
-
 // Check if the board has an LED port defined
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 35
@@ -39,6 +31,12 @@
 #define LED_BUILTIN2 36
 #endif
 
+#define VBAT_MV_PER_LSB (2.9296875F) // 3.0V ADC range and 12 - bit ADC resolution = 3000mV / 4096
+#define VBAT_DIVIDER_COMP (1.73)      // Compensation factor for the VBAT divider, depend on the board
+
+#define REAL_VBAT_MV_PER_LSB (VBAT_DIVIDER_COMP * VBAT_MV_PER_LSB)
+
+
 bool doOTAA = true;   // OTAA is used by default.
 #define SCHED_MAX_EVENT_DATA_SIZE APP_TIMER_SCHED_EVENT_DATA_SIZE /**< Maximum size of scheduler events. */
 #define SCHED_QUEUE_SIZE 60                      /**< Maximum number of events in the scheduler queue. */
@@ -46,6 +44,7 @@ bool doOTAA = true;   // OTAA is used by default.
 #define LORAWAN_DATERATE DR_0
 #define LORAWAN_TX_POWER TX_POWER_0
 #define JOINREQ_NBTRIALS 3 /**< Number of trials for the join request. */
+
 DeviceClass_t g_CurrentClass = CLASS_A;
 LoRaMacRegion_t g_CurrentRegion = LORAMAC_REGION_EU868;    /* Region:EU868*/
 lmh_confirm g_CurrentConfirm = LMH_CONFIRMED_MSG;
@@ -114,6 +113,9 @@ DallasTemperature sensorDS18B20(&oneWireObjeto);
 
 //gps
 TinyGPS gps;
+
+//vbat
+float vbat;
 
 void water_temp_init()
 {
@@ -194,11 +196,25 @@ void lorawan_confirm_class_handler(DeviceClass_t Class)
   lmh_send(&g_m_lora_app_data, g_CurrentConfirm);
 }
 
+/**
+ * @brief Get RAW Battery Voltage
+ */
+float readVBAT(void)
+{
+    int raw;
+
+    // Get the raw 12-bit, 0..3000mV ADC value
+    raw = analogRead(WB_A0);
+    Serial.printf("%d\n", raw);
+
+    return raw * REAL_VBAT_MV_PER_LSB;
+}
+
 int get_depths(void)
 {
   int i;
 
-  int sensor_pin = WB_A0;   // select the input pin for the potentiometer
+  int sensor_pin = WB_A1;   // select the input pin for the potentiometer
   int mcu_ain_raw = 0; // variable to store the value coming from the sensor
 
   int depths; // variable to store the value of oil depths
@@ -318,6 +334,12 @@ void send_lora_frame(void)
     g_m_lora_app_data.buffer[i++] = (sats >> 8) & 0xFF;
     g_m_lora_app_data.buffer[i++] = sats & 0xFF;
   }
+
+  if (HAS_BATTERY) {
+    g_m_lora_app_data.buffer[i++] = 0x0A;
+    float2Bytes(g_m_lora_app_data.buffer + i, vbat);
+    i+=4;
+  }
     
   g_m_lora_app_data.buffsize = i;
   
@@ -373,10 +395,14 @@ void setup()
   digitalWrite(WB_IO1, HIGH);*/
 
   if (HAS_DEPTH_SENSOR){
-    pinMode(WB_A0, INPUT_PULLDOWN);
+    pinMode(WB_A1, INPUT_PULLDOWN);
     analogReference(AR_INTERNAL_3_0);
     analogOversampling(128);
   }
+
+  //if (HAS_BATTERY){
+  //  pinMode(WB_A0, INPUT_PULLDOWN);
+  //}
 
   // Initialize LoRa chip.
   lora_rak4630_init();
@@ -446,6 +472,8 @@ void loop()
   noInterrupts();
   if (HAS_DEPTH_SENSOR)
     depths = get_depths();
+  if (HAS_BATTERY)
+    vbat = readVBAT();
   if (HAS_BME680)
     bme.performReading();
   interrupts();
@@ -471,6 +499,8 @@ void loop()
     Serial.printf("Sensor 8 longitude %f\n", flon);
     Serial.printf("Sensor 9 satellites %d\n", sats);
   }
+  if (HAS_BATTERY)
+    Serial.printf("Sensor 10 Battery %f mv\n", vbat);
 
   digitalWrite(LED_BUILTIN, LOW);
   delay(15000);
